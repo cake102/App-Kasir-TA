@@ -29,6 +29,11 @@ type APIProduct = {
   base_price: number;
 };
 
+type Kategori = {
+  id: string;
+  name: string;
+};
+
 const getTokenFromLocalStorage = () => {
   if (typeof window === "undefined") return "";
   const currentUser = localStorage.getItem("currentUser");
@@ -43,6 +48,7 @@ const getTokenFromLocalStorage = () => {
 const StokBarang = () => {
   const router = useRouter();
   const [barangList, setBarangList] = useState<Barang[]>([]);
+  const [kategoriList, setKategoriList] = useState<Kategori[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -85,9 +91,28 @@ const StokBarang = () => {
     }
   }, [router]);
 
+  const fetchKategori = useCallback(async () => {
+    const token = getTokenFromLocalStorage();
+    if (!token) return;
+
+    try {
+      const res = await fetch(
+        "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/categories",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Failed to fetch categories");
+      const json = await res.json();
+      setKategoriList(json.data); // asumsi format response: { data: [...] }
+    } catch (err) {
+      console.error("Kategori error:", err);
+      setKategoriList([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchKategori();
+  }, [fetchData, fetchKategori]);
 
   const filtered = barangList.filter((b) =>
     b.nama.toLowerCase().includes(searchTerm.toLowerCase())
@@ -102,6 +127,11 @@ const StokBarang = () => {
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
+
+  const getKategoriName = (id: string): string => {
+    const kategori = kategoriList.find((k) => k.id === id);
+    return kategori ? kategori.name : "Tidak Diketahui";
+  };
 
   const renderPagination = () => {
     const maxVisible = 5;
@@ -212,7 +242,6 @@ const StokBarang = () => {
     }
   };
 
-
   return (
     <MainLayout>
       <div className="flex flex-col h-screen">
@@ -268,7 +297,7 @@ const StokBarang = () => {
                     </td>
                     <td className="p-3 border">{b.nama}</td>
                     <td className="p-3 border">{b.kode}</td>
-                    <td className="p-3 border">{b.kategori}</td>
+                    <td className="p-3 border">{getKategoriName(b.kategori)}</td>
                     <td className="p-3 border">{b.stok}</td>
                     <td className="p-3 border">Rp {b.hargaJual.toLocaleString()}</td>
                     <td className="p-3 border">Rp {b.hargaDasar.toLocaleString()}</td>
@@ -290,10 +319,7 @@ const StokBarang = () => {
         </div>
 
         <EditStokModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} barang={selectedBarang} onSave={() => fetchData()} />
-        <PopupEkspor 
-        isOpen={showPopupEkspor} 
-        onClose={() => setShowPopupEkspor(false)} 
-         />
+        <PopupEkspor isOpen={showPopupEkspor} onClose={() => setShowPopupEkspor(false)} />
       </div>
     </MainLayout>
   );
