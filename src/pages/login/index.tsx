@@ -1,67 +1,82 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/router";
 
 const Login = () => {
   const router = useRouter();
 
-  // 🔹 State untuk username & password
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  // 🔹 Simpan data akun sementara di localStorage (jika belum ada)
-  useEffect(() => {
-    const existingUsers = JSON.parse(localStorage.getItem("users") || "[]");
-    if (existingUsers.length === 0) {
-      localStorage.setItem(
-        "users",
-        JSON.stringify([
-          { username: "admin", password: "admin123", role: "Owner" },
-          { username: "staff", password: "staff123", role: "Staff" },
-        ])
-      );
-    }
-  }, []);
-
-  // 🔹 Fungsi Login
-  const handleLogin = (e: any) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); // Reset error
+    setError("");
 
-    const users = JSON.parse(localStorage.getItem("users") || "[]");
-    const user = users.find((u: any) => u.username === username && u.password === password);
+    try {
+      const response = await fetch(
+        "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/sessions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ username, password }),
+        }
+      );
 
-    if (user) {
-      localStorage.setItem("currentUser", JSON.stringify(user)); // Simpan user yang login
-      router.push("/"); // 🔹 Redirect ke halaman utama setelah login
-    } else {
-      setError("Username atau Password salah!");
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result?.meta?.message || "Login gagal");
+        return;
+      }
+
+      const userData = result.data;
+
+      let role = "Staff"; // default role
+      if (userData.username === "admin" || userData.username === "johndoe") {
+        role = "Owner";
+      }
+
+      const currentUser = {
+        ...userData,
+        role,
+      };
+
+      // Simpan ke localStorage (jika memang masih ingin dipakai, atau bisa dihapus jika tidak perlu sama sekali)
+      localStorage.setItem("currentUser", JSON.stringify(currentUser));
+      localStorage.setItem("token", userData.token);
+
+      // Arahkan ke halaman sesuai role
+      if (role === "Owner") {
+        router.push("/manajemen");
+      } else {
+        router.push("/transaksi");
+      }
+    } catch (error) {
+      console.error("Login error:", error);
+      setError("Terjadi kesalahan saat login");
     }
   };
 
   return (
     <div className="h-screen w-screen bg-gray-100 flex flex-col">
-      {/* 🔹 Header dengan Logo */}
       <div className="p-6 absolute top-0 left-0 flex items-center gap-2">
         <Image src="/icons/icon.svg" alt="Logo" width={150} height={100} />
       </div>
 
-      {/* 🔹 Container Utama */}
       <div className="h-full flex items-center justify-center">
         <div className="flex w-full max-w-5xl">
-          {/* 🔹 Bagian Kiri: Gambar */}
           <div className="w-1/2 flex items-center justify-center">
             <Image src="/icons/gambar.svg" alt="Login" width={350} height={350} />
           </div>
 
-          {/* 🔹 Bagian Kanan: Form Login */}
           <div className="w-1/2 px-12 flex flex-col justify-center">
             <h2 className="text-2xl font-bold">Masuk ke Akun Anda</h2>
             <p className="text-gray-500 text-sm">Kamu dapat masuk sebagai owner ataupun staf</p>
 
-            {/* 🔹 Form Login */}
             <form onSubmit={handleLogin} className="mt-4 space-y-4">
               <div>
                 <label className="text-sm font-medium">Username</label>
@@ -94,14 +109,14 @@ const Login = () => {
                 </div>
               </div>
 
-              {/* 🔹 Error Message */}
               {error && <p className="text-red-500 text-sm">{error}</p>}
 
-              {/* 🔹 Tombol Login */}
-              <button type="submit" className="w-full bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600">
+              <button
+                type="submit"
+                className="w-full bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600"
+              >
                 Login
               </button>
-
             </form>
           </div>
         </div>

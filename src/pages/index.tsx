@@ -1,26 +1,35 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import Manajemen from "./manajemen"; // ✅ Pastikan path benar
 
-function Home() {
+export default function Home() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
-    const currentUser = localStorage.getItem("currentUser");
+    setHasMounted(true); // Hindari SSR hydration error
+
+    const currentUser = localStorage.getItem("currentUser"); // Menggunakan localStorage
+
     if (!currentUser) {
-      router.push("/login"); // 🔹 Arahkan ke login jika belum login
-    } else {
-      setIsAuthenticated(true);
+      router.replace("/login");
+      return;
+    }
+
+    try {
+      const user = JSON.parse(currentUser);
+      if (user.role === "Owner") {
+        router.replace("/manajemen");
+      } else if (user.role === "Staff") {
+        router.replace("/transaksi");
+      } else {
+        router.replace("/login");
+      }
+    } catch {
+      router.replace("/login");
     }
   }, [router]);
 
-  // 🔹 Loading sementara sebelum menentukan akses
-  if (!isAuthenticated) {
-    return <p className="text-center mt-10">Loading...</p>;
-  }
+  if (!hasMounted) return null;
 
-  return <Manajemen />;
+  return null;
 }
-
-export default Home;

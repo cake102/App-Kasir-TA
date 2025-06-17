@@ -4,83 +4,131 @@ import Image from "next/image";
 import { useRouter } from "next/router";
 import { FaArrowLeft } from "react-icons/fa";
 import TambahBarangModal from "./TambahBarangModal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+
+// Interface untuk penggunaan lokal dan modal
+export interface Barang {
+  id: number;
+  nama: string;
+  kategori: string;
+  hargaJual: number;
+  hargaDasar: number;
+  stok: number;
+  kode: string;
+  gambar?: string | null;
+}
+
+// Interface produk sesuai respons API
+interface ProdukResponse {
+  id: number;
+  name: string;
+  code_product: string;
+  stock: number;
+  base_price: number;
+  selling_price: number;
+  category_id: number | string;
+  image_url?: string;
+}
 
 const DataBarang = () => {
   const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [barangList, setBarangList] = useState<any[]>([]);
-  const [selectedBarang, setSelectedBarang] = useState<any | null>(null);
+  const [barangList, setBarangList] = useState<Barang[]>([]);
+  const [selectedBarang, setSelectedBarang] = useState<Barang | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
-  // 🔹 Load barang dari localStorage saat halaman dimuat
-  useEffect(() => {
-    const savedBarang = JSON.parse(localStorage.getItem("barangList") || "[]");
-    setBarangList(savedBarang);
-  }, []);
+  const fetchProduk = useCallback(async () => {
+    const token =
+      typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("currentUser") || "{}").token || ""
+        : "";
 
-  // 🔹 Menambahkan barang baru & update localStorage
-  const handleTambahBarang = (barangBaru: any) => {
-    const updatedBarang = [...barangList, barangBaru];
-    setBarangList(updatedBarang);
-    localStorage.setItem("barangList", JSON.stringify(updatedBarang));
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/products",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.status === 401) {
+        router.push("/login");
+        return;
+      }
+      const result = await response.json();
+
+      const mappedBarang: Barang[] = (result.data as ProdukResponse[] || []).map((item, idx) => ({
+        id: item.id ?? idx + Date.now(),
+        nama: item.name,
+        kode: item.code_product,
+        stok: item.stock,
+        hargaDasar: item.base_price,
+        hargaJual: item.selling_price,
+        kategori: String(item.category_id),
+        gambar: item.image_url
+          ? item.image_url.startsWith("http")
+            ? item.image_url
+            : `https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/${item.image_url}`
+          : null,
+      }));
+
+      setBarangList(mappedBarang);
+    } catch (error) {
+      console.error("Gagal mengambil data produk:", error);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    fetchProduk();
+  }, [fetchProduk]);
+
+  const handleTambahBarang = (barangBaru: Barang) => {
+    setBarangList(prev => [barangBaru, ...prev]);
   };
 
-  // 🔹 Filter barang berdasarkan pencarian
-  const filteredBarang = barangList.filter((barang) =>
-    barang.nama.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredBarang = barangList.filter(b =>
+    b.nama.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
     <MainLayout>
       <div className="flex flex-col h-screen">
-        {/* 🔹 Header: Kembali, Judul, Profil */}
         <div className="flex items-center justify-between p-6">
           <div className="flex items-center gap-3">
-            <FaArrowLeft
-              className="text-gray-500 cursor-pointer text-xl"
-              onClick={() => router.push("/manajemen")} // ✅ Navigasi kembali
-            />
+            <FaArrowLeft className="text-gray-500 cursor-pointer text-xl" onClick={() => router.push("/manajemen")} />
             <h1 className="text-2xl font-bold">Data Barang / Produk</h1>
           </div>
           <UserProfile />
         </div>
 
-        {/* 🔹 Garis Pembatas */}
-        <div className="w-[96%] max-w-0xl mx-auto border-b border-gray-300 mb-6"></div>
+        <div className="w-[96%] mx-auto border-b border-gray-300 mb-6" />
 
-        {/* 🔹 Kontainer Grid */}
         <div className="flex flex-grow p-6 gap-6">
-          {/* 🔹 Bagian Kiri: List Barang */}
           <div className="flex flex-col w-1/2 bg-white shadow-md rounded-lg p-6">
-            {/* 🔹 Search & Filter */}
-            <div className="flex items-center gap-3 w-full">
-              {/* 🔹 Filter Button */}
-              <button className="w-12 h-12 flex items-center justify-center border border-gray-300 rounded-lg hover:bg-gray-100">
+            <div className="flex items-center gap-3">
+              <button className="w-12 h-12 flex items-center justify-center border rounded-lg hover:bg-gray-100">
                 <Image src="/icons/filter.svg" alt="Filter" width={20} height={20} />
               </button>
-
-              {/* 🔹 Search Input */}
-              <div className="flex items-center border border-gray-300 rounded-lg px-4 py-3 w-full">
+              <div className="flex items-center border rounded-lg px-4 py-3 w-full">
                 <Image src="/icons/search.svg" alt="Search" width={20} height={20} className="mr-3" />
                 <input
                   type="text"
-                  placeholder="Cari barang.."
+                  placeholder="Cari barang..."
                   className="w-full outline-none bg-transparent text-gray-600"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={e => setSearchTerm(e.target.value)}
                 />
               </div>
             </div>
-
-            {/* 🔹 List Barang */}
             <div className="flex-grow overflow-y-auto mt-4">
               {filteredBarang.length > 0 ? (
-                filteredBarang.map((barang, index) => (
+                filteredBarang.map((barang) => (
                   <div
-                    key={index}
-                    className={`p-3 border-b text-gray-700 font-medium cursor-pointer hover:bg-gray-100 ${
-                      selectedBarang?.kode === barang.kode ? "bg-blue-100" : ""
+                    key={barang.id}
+                    className={`p-3 border-b cursor-pointer ${
+                      selectedBarang?.id === barang.id ? "bg-blue-100" : ""
                     }`}
                     onClick={() => setSelectedBarang(barang)}
                   >
@@ -93,28 +141,39 @@ const DataBarang = () => {
                 </div>
               )}
             </div>
-
-            {/* 🔹 Tombol Tambah Barang */}
             <button
               onClick={() => setIsModalOpen(true)}
-              className="w-full mt-4 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600"
+              className="w-full mt-4 bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600"
             >
               + Tambah Barang
             </button>
           </div>
 
-          {/* 🔹 Bagian Kanan: Rincian Barang */}
           <div className="flex flex-col w-1/2 bg-white shadow-md rounded-lg p-6">
-            <h2 className="text-lg font-bold">Rincian Barang :</h2>
-            <div className="flex-grow overflow-y-auto mt-4">
+            <h2 className="text-lg font-bold mb-4">Rincian Barang :</h2>
+            <div className="flex-grow overflow-y-auto">
               {selectedBarang ? (
-                <div className="space-y-3">
-                  <p><strong>Nama:</strong> {selectedBarang.nama}</p>
-                  <p><strong>Kategori:</strong> {selectedBarang.kategori}</p>
-                  <p><strong>Kode:</strong> {selectedBarang.kode}</p>
-                  <p><strong>Stok:</strong> {selectedBarang.stok}</p>
-                  <p><strong>Harga Dasar:</strong> Rp {selectedBarang.hargaDasar.toLocaleString()}</p>
-                  <p><strong>Harga Jual:</strong> Rp {selectedBarang.hargaJual.toLocaleString()}</p>
+                <div className="space-y-4">
+                  {selectedBarang.gambar && (
+                    <div className="flex justify-center">
+                      <Image
+                        src={selectedBarang.gambar}
+                        alt={selectedBarang.nama}
+                        width={192}
+                        height={192}
+                        className="object-cover border rounded-md"
+                        unoptimized
+                      />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[150px_10px_1fr] gap-y-2">
+                    <div className="font-semibold">Nama</div><div>:</div><div>{selectedBarang.nama}</div>
+                    <div className="font-semibold">Kategori</div><div>:</div><div>{selectedBarang.kategori}</div>
+                    <div className="font-semibold">Kode</div><div>:</div><div>{selectedBarang.kode}</div>
+                    <div className="font-semibold">Stok</div><div>:</div><div>{selectedBarang.stok}</div>
+                    <div className="font-semibold">Harga Dasar</div><div>:</div><div>Rp {selectedBarang.hargaDasar.toLocaleString()}</div>
+                    <div className="font-semibold">Harga Jual</div><div>:</div><div>Rp {selectedBarang.hargaJual.toLocaleString()}</div>
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center justify-center text-gray-400 h-full">
@@ -126,11 +185,10 @@ const DataBarang = () => {
         </div>
       </div>
 
-      {/* 🔹 Komponen Modal */}
       <TambahBarangModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onBarangTambah={handleTambahBarang} // 🔹 Callback untuk update daftar barang
+        onClose={() => { setIsModalOpen(false); fetchProduk(); }}
+        onBarangTambah={handleTambahBarang}
       />
     </MainLayout>
   );

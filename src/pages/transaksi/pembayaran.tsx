@@ -1,84 +1,202 @@
+// src/pages/transaksi/pembayaran.tsx
+
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import MainLayout from "../../layouts/MainLayout";
 import UserProfile from "../../components/UserProfile";
-import Image from "next/image";
-import PopupSukses from "./PopupSukses";
+import PopupSukses from "@/components/PopupSukses";
+
+type ItemType = {
+  nama: string;
+  jumlah: number;
+  hargaJual: number;
+};
+
+type BarangType = {
+  id: number;
+  name: string;
+};
+
+type TransaksiType = {
+  id: string;
+  waktuOrder: string;
+  waktuBayar: string;
+  outlet: string;
+  barangList: ItemType[];
+  total: number;
+  metode: string;
+};
+
+const formatRupiah = (angka: string): string => {
+  const numericValue = parseInt(angka.replace(/\D/g, ""), 10);
+  if (isNaN(numericValue)) return "Rp 0";
+  return "Rp " + numericValue.toLocaleString("id-ID");
+};
 
 const Pembayaran = () => {
   const router = useRouter();
-  const [selectedItems, setSelectedItems] = useState<any[]>([]);
+  const [selectedItems, setSelectedItems] = useState<ItemType[]>([]);
   const [totalHarga, setTotalHarga] = useState(0);
   const [inputPembayaran, setInputPembayaran] = useState("");
   const [metodePembayaran, setMetodePembayaran] = useState("Cash");
   const [showPopupSukses, setShowPopupSukses] = useState(false);
   const [kembalian, setKembalian] = useState<number | null>(null);
+  const [lastTransaksi, setLastTransaksi] = useState<TransaksiType | null>(null);
+  const [barangList, setBarangList] = useState<BarangType[]>([]);
 
   useEffect(() => {
     if (router.query.data) {
-      const decodedData = JSON.parse(decodeURIComponent(router.query.data));
-      setSelectedItems(decodedData);
-      setTotalHarga(Number(router.query.total));
+      try {
+        const decodedData = JSON.parse(decodeURIComponent(router.query.data as string));
+        setSelectedItems(decodedData);
+        setTotalHarga(Number(router.query.total));
+      } catch {
+        alert("Data transaksi tidak valid.");
+      }
     }
   }, [router.query]);
 
-  const handleInput = (value: string) => {
-    if (value === "C") {
-      setInputPembayaran("");
-    } else if (value === "Backspace" || value === "←") {
-      setInputPembayaran((prev) => prev.slice(0, -1));
-    } else if (/^[0-9.]$/.test(value)) {
-      setInputPembayaran((prev) => prev + value);
-    }
-  };
-
   useEffect(() => {
-    const handleKeyPress = (event: KeyboardEvent) => {
-      handleInput(event.key);
+    const fetchBarangList = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      try {
+        const res = await fetch(
+          "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/products",
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        if (!res.ok) throw new Error("Gagal mengambil data barang");
+
+        const data = await res.json();
+        setBarangList(data.data);
+      } catch (err) {
+        console.error("Gagal ambil barang dari API:", err);
+      }
     };
 
-    window.addEventListener("keydown", handleKeyPress);
-    return () => window.removeEventListener("keydown", handleKeyPress);
+    fetchBarangList();
   }, []);
 
-  const handleBayar = () => {
+  const handleBayar = useCallback(async () => {
     const cashGiven = parseFloat(inputPembayaran) || 0;
-    if (metodePembayaran === "Cash" && cashGiven < totalHarga) {
+    const isQRIS = metodePembayaran === "QRIS";
+
+    if (!isQRIS && cashGiven < totalHarga) {
       alert("Uang yang diberikan kurang!");
       return;
     }
 
-    // 🔹 Kurangi stok barang di `localStorage`
-    const barangList = JSON.parse(localStorage.getItem("barangList") || "[]");
-
-    const updatedBarangList = barangList.map((barang: any) => {
-      const itemDibeli = selectedItems.find((item: any) => item.kode === barang.kode);
-      if (itemDibeli) {
-        return { ...barang, stok: Math.max(barang.stok - itemDibeli.jumlah, 0) };
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        alert("Token tidak ditemukan. Silakan login ulang.");
+        return;
       }
-      return barang;
-    });
 
-    // Simpan kembali data barang yang stoknya sudah berkurang
-    localStorage.setItem("barangList", JSON.stringify(updatedBarangList));
+      const products = [];
 
-    // 🔹 Simpan transaksi ke `localStorage` dengan daftar barang
-    const transaksiBaru = {
-      id: `TRX${Date.now()}`,
-      waktuOrder: new Date().toLocaleString(),
-      waktuBayar: new Date().toLocaleString(),
-      outlet: "Outlet 1",
-      barangList: selectedItems, // ✅ Simpan barang dalam transaksi
-      total: totalHarga,
-      metode: metodePembayaran,
+      for (const item of selectedItems) {
+        const barang = barangList.find((b) => b.name === item.nama);
+
+        if (!barang || typeof barang.id !== "number") {
+          alert(`Produk '${item.nama}' tidak ditemukan dalam database.`);
+          return;
+        }
+
+        products.push({
+          product_id: barang.id,
+          quantity: item.jumlah,
+        });
+      }
+
+      const payload = {
+        products,
+        balance: isQRIS ? totalHarga : cashGiven,
+        payment_method: isQRIS ? "qris" : "cash",
+        notes: isQRIS ? "Pembayaran via QRIS (manual)" : "",
+      };
+
+      const response = await fetch(
+        "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/transactions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || data.meta?.status !== "success") {
+        throw new Error(data.meta?.message || "Gagal membuat transaksi");
+      }
+
+      setKembalian(isQRIS ? 0 : cashGiven - totalHarga);
+
+      const transaksiBaru: TransaksiType = {
+        id: data.data.trx_code || `TRX${Date.now()}`,
+        waktuOrder: data.data.waktu_order || new Date().toLocaleString(),
+        waktuBayar: data.data.waktu_bayar || new Date().toLocaleString(),
+        outlet: "Outlet 1",
+        barangList: selectedItems,
+        total: totalHarga,
+        metode: metodePembayaran,
+      };
+
+      const transaksiSebelumnya = JSON.parse(localStorage.getItem("transaksi") || "[]");
+      localStorage.setItem("transaksi", JSON.stringify([transaksiBaru, ...transaksiSebelumnya]));
+
+      setLastTransaksi(transaksiBaru);
+      setShowPopupSukses(true);
+    } catch (err) {
+      if (err instanceof Error) {
+        console.error("Transaksi gagal:", err.message);
+        alert(err.message);
+      } else {
+        console.error("Transaksi gagal:", err);
+        alert("Terjadi kesalahan saat membuat transaksi.");
+      }
+    }
+  }, [inputPembayaran, selectedItems, totalHarga, metodePembayaran, barangList]);
+
+  const handleInput = useCallback(
+    (value: string) => {
+      if (value === "C") {
+        setInputPembayaran("");
+      } else if (value === "Backspace" || value === "←") {
+        setInputPembayaran((prev) => prev.slice(0, -1));
+      } else if (value === "✔") {
+        handleBayar();
+      } else if (/^[0-9.]$/.test(value) || value === "00") {
+        setInputPembayaran((prev) => prev + value);
+      }
+    },
+    [handleBayar]
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        handleInput("✔");
+      } else if (e.key === "Backspace") {
+        handleInput("Backspace");
+      } else if (/^[0-9]$/.test(e.key)) {
+        handleInput(e.key);
+      }
     };
 
-    const transaksiSebelumnya = JSON.parse(localStorage.getItem("transaksi") || "[]");
-    localStorage.setItem("transaksi", JSON.stringify([transaksiBaru, ...transaksiSebelumnya]));
-
-    setKembalian(cashGiven - totalHarga);
-    setShowPopupSukses(true);
-  };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleInput]);
 
   return (
     <MainLayout>
@@ -95,74 +213,79 @@ const Pembayaran = () => {
           <div className="w-1/2 bg-white shadow-md rounded-lg p-6">
             <h2 className="text-lg font-bold mb-3">List Barang</h2>
             <ul>
-              {selectedItems.map((item: any) => (
-                <li key={item.kode} className="flex justify-between items-center py-3 border-b">
-                  <div className="flex items-center gap-3">
-                    <span className="text-lg font-bold">{item.jumlah}</span>
-                    <Image src="/icons/box.svg" alt={item.nama} width={40} height={40} className="rounded-md" />
-                    <span className="font-semibold">{item.nama}</span>
-                  </div>
-                  <span className="text-lg">{`Rp ${(item.hargaJual * item.jumlah).toLocaleString()}`}</span>
+              {selectedItems.map((item) => (
+                <li key={item.nama} className="flex justify-between items-center py-2 border-b">
+                  <div className="font-medium">{item.nama} x {item.jumlah}</div>
+                  <div>{formatRupiah((item.hargaJual * item.jumlah).toString())}</div>
                 </li>
               ))}
             </ul>
-
-            <div className="mt-4">
-              <div className="flex justify-between text-xl font-bold">
-                <span>Total</span>
-                <span>{`Rp ${totalHarga.toLocaleString()}`}</span>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="text-lg font-semibold">Metode Pembayaran :</label>
-              <select
-                className="w-full p-2 mt-2 border border-gray-300 rounded-lg"
-                value={metodePembayaran}
-                onChange={(e) => setMetodePembayaran(e.target.value)}
-              >
-                <option>Cash</option>
-                <option>QRIS</option>
-              </select>
+            <div className="text-right mt-4 text-xl font-bold">
+              Total: {formatRupiah(totalHarga.toString())}
             </div>
           </div>
 
-          <div className="w-1/2 bg-white shadow-md rounded-lg p-6">
-            <h2 className="text-lg font-bold mb-3">Pembayaran</h2>
+          <div className="w-1/2 bg-white shadow-md rounded-lg p-6 flex flex-col justify-between">
+            <div>
+              <h2 className="text-lg font-bold mb-3">Metode Pembayaran</h2>
+              <select
+                className="w-full border p-2 rounded mb-4"
+                value={metodePembayaran}
+                onChange={(e) => setMetodePembayaran(e.target.value)}
+              >
+                <option value="Cash">Cash</option>
+                <option value="QRIS">QRIS</option>
+              </select>
 
-            <div className="w-full p-3 text-xl text-center border border-gray-300 rounded-lg mb-4">
-              {inputPembayaran || "Rp 0"}
+              <h2 className="text-lg font-bold mb-3">Input Pembayaran</h2>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="w-full border p-2 text-xl rounded mb-4 text-right"
+                placeholder="0"
+                value={formatRupiah(inputPembayaran)}
+                readOnly
+              />
+
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {["1", "2", "3", "4", "5", "6", "7", "8", "9", "00", "0", "←"].map((val) => (
+                  <button
+                    key={val}
+                    className="p-4 text-lg font-semibold bg-gray-200 hover:bg-gray-300 rounded"
+                    onClick={() => handleInput(val)}
+                  >
+                    {val}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                className="w-full bg-green-600 text-white py-3 text-xl rounded hover:bg-green-700"
+                onClick={handleBayar}
+              >
+                Bayar
+              </button>
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
-              {["1", "2", "3", "C", "4", "5", "6", "←", "7", "8", "9", ".", "0", "00", "000", "✔"].map((num) => (
-                <button
-                  key={num}
-                  onClick={() => handleInput(num)}
-                  className={`w-full p-4 text-2xl rounded-lg border shadow ${
-                    num === "✔"
-                      ? "bg-green-500 text-white"
-                      : num === "C" || num === "←"
-                      ? "bg-red-500 text-white"
-                      : "bg-gray-100"
-                  }`}
-                >
-                  {num}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={handleBayar}
-              className="w-full mt-4 bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600"
-            >
-              Bayar
-            </button>
+            {kembalian !== null && metodePembayaran === "Cash" && (
+              <div className="mt-4 text-xl text-right font-semibold text-green-700">
+                Kembalian: {formatRupiah(kembalian.toString())}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {showPopupSukses && <PopupSukses kembalian={kembalian} onClose={() => router.push("/laporan")} />}
+      {showPopupSukses && lastTransaksi && (
+        <PopupSukses
+          transaksi={lastTransaksi}
+          kembalian={kembalian}
+          onClose={() => {
+            setShowPopupSukses(false);
+            router.push("/transaksi");
+          }}
+        />
+      )}
     </MainLayout>
   );
 };

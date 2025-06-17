@@ -1,130 +1,299 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import MainLayout from "../../layouts/MainLayout";
 import UserProfile from "../../components/UserProfile";
 import Image from "next/image";
 import { useRouter } from "next/router";
 import { FaArrowLeft } from "react-icons/fa";
+import EditStokModal from "./EditStokModal";
+import PopupEkspor from "./PopupEkspor";
+
+type Barang = {
+  id: string;
+  nama: string;
+  gambar: string;
+  kode: string;
+  kategori: string;
+  stok: number;
+  hargaJual: number;
+  hargaDasar: number;
+};
+
+type APIProduct = {
+  id: string;
+  name: string;
+  image_url?: string;
+  code_product?: string;
+  category_id: string;
+  stock: number;
+  selling_price: number;
+  base_price: number;
+};
+
+const getTokenFromLocalStorage = () => {
+  if (typeof window === "undefined") return "";
+  const currentUser = localStorage.getItem("currentUser");
+  if (!currentUser) return "";
+  try {
+    return JSON.parse(currentUser)?.token || "";
+  } catch {
+    return "";
+  }
+};
 
 const StokBarang = () => {
   const router = useRouter();
-  const [barangList, setBarangList] = useState<any[]>([]);
+  const [barangList, setBarangList] = useState<Barang[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedBarang, setSelectedBarang] = useState<Barang | null>(null);
+  const [showPopupEkspor, setShowPopupEkspor] = useState(false);
+  const itemsPerPage = 8;
 
-  // 🔹 Load barang dari localStorage saat halaman dimuat
+  const fetchData = useCallback(async () => {
+    const token = getTokenFromLocalStorage();
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+    try {
+      const res = await fetch(
+        "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/products",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Failed to fetch data");
+      const json = await res.json();
+      const mapped: Barang[] = json.data.map((item: APIProduct) => {
+        const isFullUrl = item.image_url?.startsWith("http");
+        return {
+          id: item.id,
+          nama: item.name,
+          gambar: isFullUrl
+            ? item.image_url
+            : `https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/${item.image_url}`,
+          kode: item.code_product || "-",
+          kategori: item.category_id,
+          stok: item.stock,
+          hargaJual: item.selling_price,
+          hargaDasar: item.base_price,
+        };
+      });
+      setBarangList(mapped);
+    } catch (err) {
+      console.error(err);
+      setBarangList([]);
+    }
+  }, [router]);
+
   useEffect(() => {
-    const savedBarang = JSON.parse(localStorage.getItem("barangList") || "[]");
-    setBarangList(savedBarang);
-  }, []);
+    fetchData();
+  }, [fetchData]);
 
-  // 🔹 Filter barang berdasarkan pencarian
-  const filteredBarang = barangList.filter((barang) =>
-    barang.nama.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = barangList.filter((b) =>
+    b.nama.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginated = filtered.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const renderPagination = () => {
+    const maxVisible = 5;
+    const start = Math.max(
+      1,
+      Math.min(currentPage - Math.floor(maxVisible / 2), totalPages - maxVisible + 1)
+    );
+    const end = Math.min(start + maxVisible - 1, totalPages);
+    const pages = [];
+
+    pages.push(
+      <button
+        key="prev"
+        onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+        disabled={currentPage === 1}
+        className="border px-3 py-1 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+      >
+        &lt;
+      </button>
+    );
+
+    if (start > 1) {
+      pages.push(
+        <button
+          key={1}
+          onClick={() => setCurrentPage(1)}
+          className={`border px-3 py-1 rounded-lg ${
+            currentPage === 1 ? "bg-blue-500 text-white" : "hover:bg-gray-100"
+          }`}
+        >
+          1
+        </button>
+      );
+      if (start > 2) pages.push(<span key="start-ell" className="px-2">...</span>);
+    }
+
+    for (let p = start; p <= end; p++) {
+      pages.push(
+        <button
+          key={p}
+          onClick={() => setCurrentPage(p)}
+          className={`border px-3 py-1 rounded-lg ${
+            currentPage === p ? "bg-blue-500 text-white" : "hover:bg-gray-100"
+          }`}
+        >
+          {p}
+        </button>
+      );
+    }
+
+    if (end < totalPages) {
+      if (end < totalPages - 1) pages.push(<span key="end-ell" className="px-2">...</span>);
+      pages.push(
+        <button
+          key={totalPages}
+          onClick={() => setCurrentPage(totalPages)}
+          className={`border px-3 py-1 rounded-lg ${
+            currentPage === totalPages ? "bg-blue-500 text-white" : "hover:bg-gray-100"
+          }`}
+        >
+          {totalPages}
+        </button>
+      );
+    }
+
+    pages.push(
+      <button
+        key="next"
+        onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+        disabled={currentPage === totalPages}
+        className="border px-3 py-1 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+      >
+        &gt;
+      </button>
+    );
+
+    return <div className="flex justify-center items-center p-4 text-sm text-gray-500 gap-2">{pages}</div>;
+  };
+
+  const handleEditClick = (b: Barang) => {
+    setSelectedBarang(b);
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteClick = async (kode: string) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus barang ini?")) return;
+    const token = getTokenFromLocalStorage();
+    if (!token) {
+      alert("Silakan login ulang");
+      router.push("/login");
+      return;
+    }
+    const b = barangList.find((x) => x.kode === kode);
+    if (!b) return alert("Barang tidak ditemukan");
+
+    try {
+      const res = await fetch(
+        `https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/products/${b.id}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.meta?.message || "Error");
+      alert("Terhapus");
+      fetchData();
+    } catch (e) {
+      console.error(e);
+      alert("Gagal hapus");
+    }
+  };
+
 
   return (
     <MainLayout>
       <div className="flex flex-col h-screen">
-        {/* 🔹 Header */}
         <div className="flex items-center justify-between p-6 w-[96%] mx-auto">
           <div className="flex items-center gap-3">
-            <FaArrowLeft
-              className="text-gray-500 cursor-pointer text-xl"
-              onClick={() => router.push("/manajemen")}
-            />
+            <FaArrowLeft className="text-gray-500 cursor-pointer text-xl" onClick={() => router.push("/manajemen")} />
             <h1 className="text-2xl font-bold">Stok Barang</h1>
           </div>
           <UserProfile />
         </div>
 
-        {/* 🔹 Garis Pembatas */}
         <div className="w-[96%] mx-auto border-b border-gray-300 mt-3"></div>
 
-        {/* 🔹 Tombol Export & Import */}
         <div className="flex justify-between items-center px-6 mt-4 w-[96%] mx-auto">
-          <div className="flex gap-3">
-            <button className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
-              <Image src="/icons/export.svg" alt="Export" width={20} height={20} />
-              Export Data
-            </button>
-            <button className="flex items-center gap-2 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">
-              <Image src="/icons/import.svg" alt="Import" width={20} height={20} />
-              Import Data
-            </button>
-          </div>
-
-          {/* 🔹 Search Input */}
+          <button
+            onClick={() => setShowPopupEkspor(true)}
+            className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
+          >
+            Export & Import Data
+          </button>
           <div className="flex items-center border border-gray-300 rounded-lg px-4 py-3 w-80">
             <Image src="/icons/search.svg" alt="Search" width={20} height={20} className="mr-3" />
             <input
               type="text"
               placeholder="Cari barang.."
-              className="w-full outline-none bg-transparent text-gray-600"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full outline-none bg-transparent text-gray-600"
             />
           </div>
         </div>
 
-        {/* 🔹 Kontainer Tabel */}
-        <div className="flex flex-grow w-full items-start justify-center p-6 mt-3">
-          <div className="w-[96%] bg-white shadow-md rounded-lg overflow-hidden flex flex-col">
-            {/* 🔹 Tabel Stok Barang */}
+        <div className="flex-grow overflow-auto p-6">
+          <div className="bg-white shadow-md rounded-lg overflow-hidden">
             <table className="w-full border-collapse border">
               <thead>
-                <tr className="bg-blue-500 text-white text-left">
-                  <th className="p-3 border">Nama Barang</th>
+                <tr className="bg-blue-500 text-white">
+                  <th className="p-3 border">Gambar</th>
+                  <th className="p-3 border">Nama</th>
                   <th className="p-3 border">Kode</th>
                   <th className="p-3 border">Kategori</th>
                   <th className="p-3 border">Stok</th>
-                  <th className="p-3 border">Harga Jual (Rp)</th>
-                  <th className="p-3 border">Harga Dasar (Rp)</th>
+                  <th className="p-3 border">Harga Jual</th>
+                  <th className="p-3 border">Harga Dasar</th>
                   <th className="p-3 border">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="align-top"> {/* 🔹 Data mulai dari atas */}
-                {filteredBarang.length > 0 ? (
-                  filteredBarang.map((barang, index) => (
-                    <tr key={index} className="border">
-                      <td className="p-3 border">{barang.nama}</td>
-                      <td className="p-3 border">{barang.kode}</td>
-                      <td className="p-3 border">{barang.kategori}</td>
-                      <td className="p-3 border">{barang.stok}</td>
-                      <td className="p-3 border">Rp {barang.hargaJual.toLocaleString()}</td>
-                      <td className="p-3 border">Rp {barang.hargaDasar.toLocaleString()}</td>
-                      <td className="p-3 border text-red-500 cursor-pointer hover:text-red-700">Hapus</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="p-5 text-center text-gray-400 border">
-                      Data tidak ditemukan
+              <tbody>
+                {paginated.map((b, i) => (
+                  <tr key={i} className="border">
+                    <td className="p-3 border">
+                      <Image src={b.gambar} alt={b.nama} width={50} height={50} unoptimized className="rounded-md" />
                     </td>
+                    <td className="p-3 border">{b.nama}</td>
+                    <td className="p-3 border">{b.kode}</td>
+                    <td className="p-3 border">{b.kategori}</td>
+                    <td className="p-3 border">{b.stok}</td>
+                    <td className="p-3 border">Rp {b.hargaJual.toLocaleString()}</td>
+                    <td className="p-3 border">Rp {b.hargaDasar.toLocaleString()}</td>
+                    <td className="p-3 border">
+                      <span onClick={() => handleEditClick(b)} className="text-green-500 cursor-pointer mr-2 hover:text-green-700">Edit</span>
+                      <span onClick={() => handleDeleteClick(b.kode)} className="text-red-500 cursor-pointer hover:text-red-700">Hapus</span>
+                    </td>
+                  </tr>
+                ))}
+                {paginated.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="p-5 text-center text-gray-400 border">Data tidak ditemukan</td>
                   </tr>
                 )}
               </tbody>
             </table>
-
-            {/* 🔹 Pagination */}
-            <div className="flex justify-between items-center p-4 text-sm text-gray-500">
-              <div className="flex items-center gap-2">
-                <span>Tampilkan:</span>
-                <select className="border rounded-lg px-2 py-1">
-                  <option value="1">1</option>
-                  <option value="5">5</option>
-                  <option value="10">10</option>
-                </select>
-                <span>Ditampilkan {filteredBarang.length} dari {barangList.length} data</span>
-              </div>
-
-              {/* 🔹 Navigasi Halaman */}
-              <div className="flex items-center gap-2">
-                <button className="border px-2 py-1 rounded-lg text-gray-500 hover:bg-gray-200">&lt;</button>
-                <span className="border px-3 py-1 rounded-lg bg-blue-500 text-white">1</span>
-                <button className="border px-2 py-1 rounded-lg text-gray-500 hover:bg-gray-200">&gt;</button>
-              </div>
-            </div>
+            {renderPagination()}
           </div>
         </div>
+
+        <EditStokModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} barang={selectedBarang} onSave={() => fetchData()} />
+        <PopupEkspor 
+        isOpen={showPopupEkspor} 
+        onClose={() => setShowPopupEkspor(false)} 
+         />
       </div>
     </MainLayout>
   );
