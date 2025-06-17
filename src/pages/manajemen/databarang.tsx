@@ -30,12 +30,41 @@ interface ProdukResponse {
   image_url?: string;
 }
 
+interface Kategori {
+  id: number;
+  name: string;
+}
+
 const DataBarang = () => {
   const router = useRouter();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [barangList, setBarangList] = useState<Barang[]>([]);
   const [selectedBarang, setSelectedBarang] = useState<Barang | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [kategoriList, setKategoriList] = useState<Kategori[]>([]);
+
+  const fetchKategori = useCallback(async () => {
+    const token =
+      typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("currentUser") || "{}").token || ""
+        : "";
+
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        "https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/api/v1/categories",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const result = await response.json();
+      setKategoriList(result.data || []);
+    } catch (error) {
+      console.error("Gagal mengambil data kategori:", error);
+    }
+  }, [router]);
 
   const fetchProduk = useCallback(async () => {
     const token =
@@ -59,30 +88,40 @@ const DataBarang = () => {
       }
       const result = await response.json();
 
-      const mappedBarang: Barang[] = (result.data as ProdukResponse[] || []).map((item, idx) => ({
-        id: item.id ?? idx + Date.now(),
-        nama: item.name,
-        kode: item.code_product,
-        stok: item.stock,
-        hargaDasar: item.base_price,
-        hargaJual: item.selling_price,
-        kategori: String(item.category_id),
-        gambar: item.image_url
-          ? item.image_url.startsWith("http")
-            ? item.image_url
-            : `https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/${item.image_url}`
-          : null,
-      }));
+      const mappedBarang: Barang[] = (result.data as ProdukResponse[] || []).map((item, idx) => {
+        const kategoriNama = kategoriList.find(k => k.id === Number(item.category_id))?.name || "Tidak diketahui";
+
+        return {
+          id: item.id ?? idx + Date.now(),
+          nama: item.name,
+          kode: item.code_product,
+          stok: item.stock,
+          hargaDasar: item.base_price,
+          hargaJual: item.selling_price,
+          kategori: kategoriNama,
+          gambar: item.image_url
+            ? item.image_url.startsWith("http")
+              ? item.image_url
+              : `https://cashier-app-dfamcgc4g3cbhwdw.southeastasia-01.azurewebsites.net/${item.image_url}`
+            : null,
+        };
+      });
 
       setBarangList(mappedBarang);
     } catch (error) {
       console.error("Gagal mengambil data produk:", error);
     }
-  }, [router]);
+  }, [router, kategoriList]);
 
   useEffect(() => {
-    fetchProduk();
-  }, [fetchProduk]);
+    fetchKategori();
+  }, [fetchKategori]);
+
+  useEffect(() => {
+    if (kategoriList.length > 0) {
+      fetchProduk();
+    }
+  }, [kategoriList, fetchProduk]);
 
   const handleTambahBarang = (barangBaru: Barang) => {
     setBarangList(prev => [barangBaru, ...prev]);
